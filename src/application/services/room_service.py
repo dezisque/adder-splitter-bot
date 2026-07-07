@@ -1,7 +1,7 @@
 import secrets
 
 from src.application.dto import RoomOverview
-from src.application.interfaces import ExpenseRepo, ParticipantRepo, RoomRepo
+from src.application.interfaces import ExpenseRepo, ParticipantRepo, RoomRepo, UserRepo
 from src.application.services._access import ensure_owner, ensure_writable, get_room_and_member
 from src.domain import limits
 from src.domain.entities import Room, User
@@ -14,11 +14,16 @@ def _new_token() -> str:
 
 class RoomService:
     def __init__(
-        self, rooms: RoomRepo, participants: ParticipantRepo, expenses: ExpenseRepo
+        self,
+        rooms: RoomRepo,
+        participants: ParticipantRepo,
+        expenses: ExpenseRepo,
+        users: UserRepo,
     ) -> None:
         self._rooms = rooms
         self._participants = participants
         self._expenses = expenses
+        self._users = users
 
     async def create(self, owner: User, title: str) -> Room:
         title = title.strip()
@@ -44,6 +49,10 @@ class RoomService:
 
     async def get_overview(self, user: User, room_id: int) -> RoomOverview:
         room, me = await get_room_and_member(self._rooms, self._participants, user, room_id)
+        # запоминаем «текущую» комнату — сюда попадёт быстрый ввод «Мясо 2450»
+        if not room.is_archived and user.current_room_id != room.id:
+            await self._users.set_current_room(user.id, room.id)
+            user.current_room_id = room.id
         members_count = await self._participants.count_active(room.id)
         expenses_count, expenses_sum = await self._expenses.expense_stats(room.id)
         paid = await self._expenses.paid_totals(room.id)

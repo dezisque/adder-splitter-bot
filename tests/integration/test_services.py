@@ -61,6 +61,10 @@ async def test_full_flow(services: Services) -> None:
     # личный баланс в карточке комнаты совпадает с расчётом
     overview = await services.rooms.get_overview(igor, room.id)
     assert overview.my_net == 233_333
+
+    # get_overview запоминает «текущую» комнату для быстрого ввода
+    fresh_igor = await services.users.get(igor.id)
+    assert fresh_igor is not None and fresh_igor.current_room_id == room.id
     assert sum(e.net for e in view.lines) == 0
     assert sum(e.owed for e in view.lines) == 650_000
     # Игорь — единственный кредитор, ему должны и Маша, и Данил
@@ -112,6 +116,7 @@ async def test_history_and_edits(services: Services) -> None:
 
     page = await services.expenses.get_history_page(igor, room.id, 0)
     assert page.total_pages == 1 and len(page.items) == 1
+    assert page.items[0].payer_name == "Маша"
 
     room_id = await services.expenses.delete(igor, expense.id)
     assert room_id == room.id

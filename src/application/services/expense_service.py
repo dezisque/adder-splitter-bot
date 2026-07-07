@@ -187,12 +187,17 @@ class ExpenseService:
         expenses = await self._expenses.list_page(
             room.id, page * limits.EXPENSES_PAGE_SIZE, limits.EXPENSES_PAGE_SIZE
         )
+        parts = {
+            p.id: p for p in await self._participants.list_by_room(room.id, include_inactive=True)
+        }
         items = [
             HistoryItem(
                 expense_id=e.id,
                 kind=e.kind,
                 description=e.description,
                 amount=e.amount.amount,
+                payer_name=parts[e.paid_by_participant_id].display_name,
+                created_at=e.created_at,
             )
             for e in expenses
         ]

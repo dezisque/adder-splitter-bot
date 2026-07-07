@@ -21,6 +21,7 @@ from src.presentation.bot.callbacks import (
     SplitAction,
     SplitCB,
 )
+from src.presentation.bot.handlers.quick_add import build_quick_preview
 from src.presentation.bot.keyboards.expense import (
     cancel_kb,
     confirm_expense_kb,
@@ -53,6 +54,7 @@ async def add_expense_start(
     if overview.room.is_archived:
         await callback.answer(texts.ROOM_ARCHIVED_ALERT, show_alert=True)
         return
+    await state.clear()  # чтобы не унаследовать данные брошенного диалога
     await state.set_state(AddExpense.description)
     await state.update_data(
         room_id=overview.room.id, me_id=overview.me.id, currency=overview.room.currency
@@ -79,8 +81,13 @@ async def add_expense_amount(
 ) -> None:
     amount = parse_amount(message.text or "")
     data = await state.get_data()
-    participants = await member_service.list_members(user, data["room_id"])
     await state.update_data(amount=amount)
+    if data.get("quick"):
+        # быстрый ввод: сразу превью с умолчаниями, без шагов плательщика/делёжки
+        text, kb = await build_quick_preview(state, user, member_service)
+        await message.answer(text, reply_markup=kb)
+        return
+    participants = await member_service.list_members(user, data["room_id"])
     await state.set_state(AddExpense.payer)
     await message.answer(
         texts.EXPENSE_PAYER_PROMPT, reply_markup=payer_kb(participants, data["me_id"])
@@ -209,7 +216,7 @@ async def _show_history(
     history = await expense_service.get_history_page(user, room_id, page)
     await edit_or_answer(
         callback,
-        formatters.history_header(history.page, history.total_pages),
+        formatters.history_page_text(history),
         history_kb(history, room_id),
     )
     await callback.answer()

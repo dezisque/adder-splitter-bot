@@ -2,7 +2,7 @@
 
 from html import escape
 
-from src.application.dto import BalanceView, ExpenseCard, MemberView, RoomOverview
+from src.application.dto import BalanceView, ExpenseCard, HistoryPage, MemberView, RoomOverview
 from src.domain import limits
 from src.domain.entities import Participant, Room
 from src.domain.enums import ExpenseKind
@@ -40,11 +40,17 @@ def room_card(o: RoomOverview) -> str:
         my = f"🔴 Ваш баланс: <b>{money(o.my_net, currency)}</b> — вы должны"
     else:
         my = f"⚪️ Ваш баланс: <b>{money(0, currency)}</b> — всё закрыто"
+    hint = (
+        ""
+        if o.room.is_archived
+        else "\n\n💡 Отправьте сообщение вида «Мясо 2450» — добавлю расход в эту комнату."
+    )
     return (
         f"<b>{escape(o.room.title)}</b>{archived}\n\n"
         f"{my}\n\n"
         f"👥 Участников: {o.members_count}\n"
         f"🧾 Расходов: {o.expenses_count} на {money(o.expenses_sum, currency)}"
+        f"{hint}"
     )
 
 
@@ -98,10 +104,13 @@ def expense_preview(
     currency: str,
     payer: Participant,
     split_between: list[Participant],
+    room_title: str | None = None,
 ) -> str:
     names = ", ".join(name(p) for p in split_between)
+    room_line = f"Комната: <b>{escape(room_title)}</b>\n" if room_title else ""
     return (
         "<b>Проверьте:</b>\n\n"
+        f"{room_line}"
         f"🧾 {escape(description)} — <b>{money(amount, currency)}</b>\n"
         f"Оплатил: {name(payer)}\n"
         f"Делится между ({len(split_between)}): {names}"
@@ -133,14 +142,20 @@ def expense_card(card: ExpenseCard) -> str:
     return f"{body}\n\nДобавил: {escape(card.author_name)}, {created}"
 
 
-def history_header(page: int, total_pages: int) -> str:
-    pages = f" — стр. {page + 1}/{total_pages}" if total_pages > 1 else ""
-    return f"<b>🕓 История{pages}</b>\n\nНажмите на запись, чтобы открыть её."
-
-
-def history_button(kind: ExpenseKind, description: str, amount: int, currency: str) -> str:
-    icon = "↩️" if kind is ExpenseKind.REPAYMENT else "🧾"
-    return f"{icon} {description[:24]} — {money(amount, currency)}"
+def history_page_text(page: HistoryPage) -> str:
+    pages = f" — стр. {page.page + 1}/{page.total_pages}" if page.total_pages > 1 else ""
+    header = f"<b>🕓 История{pages}</b>"
+    if not page.items:
+        return f"{header}\n\nПока нет ни одной записи."
+    lines = [header, ""]
+    for i, item in enumerate(page.items, start=1):
+        icon = "↩️" if item.kind is ExpenseKind.REPAYMENT else "🧾"
+        lines.append(
+            f"{i}. {icon} <b>{escape(item.description)}</b> — {money(item.amount, page.currency)}"
+            f" · {escape(item.payer_name)}, {item.created_at.strftime('%d.%m')}"
+        )
+    lines.append("\nОткрыть запись — кнопкой с её номером.")
+    return "\n".join(lines)
 
 
 def balance(view: BalanceView) -> str:

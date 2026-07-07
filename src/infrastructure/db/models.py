@@ -29,6 +29,10 @@ class UserModel(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     username: Mapped[str | None] = mapped_column(String(32))
     first_name: Mapped[str] = mapped_column(String(128))
+    # последняя открытая комната — сюда попадает быстрый ввод «Мясо 2450»
+    current_room_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("rooms.id", ondelete="SET NULL", use_alter=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now()
     )

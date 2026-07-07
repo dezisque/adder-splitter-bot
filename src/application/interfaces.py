@@ -14,6 +14,8 @@ class UserRepo(Protocol):
 
     async def update_profile(self, user_id: int, username: str | None, first_name: str) -> None: ...
 
+    async def set_current_room(self, user_id: int, room_id: int | None) -> None: ...
+
 
 class RoomRepo(Protocol):
     async def create(

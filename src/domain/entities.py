@@ -14,6 +14,7 @@ class User:
     username: str | None
     first_name: str
     created_at: datetime
+    current_room_id: int | None = None
 
 
 @dataclass(slots=True)

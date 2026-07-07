@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.application.dto import ExpenseCard, HistoryPage
-from src.domain.entities import Participant
+from src.domain.entities import Participant, Room
 from src.domain.enums import ExpenseKind
 from src.presentation.bot import formatters
 from src.presentation.bot.callbacks import (
@@ -13,6 +13,8 @@ from src.presentation.bot.callbacks import (
     ExpCB,
     ExpListCB,
     PayerCB,
+    QuickAdjustCB,
+    QuickRoomCB,
     RoomAction,
     RoomCB,
     SplitAction,
@@ -72,14 +74,33 @@ def confirm_expense_kb() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def quick_confirm_kb() -> InlineKeyboardMarkup:
+    """Превью быстрого ввода: по умолчанию платит автор, делится на всех."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Сохранить", callback_data=ConfirmCB())
+    kb.button(text="⚙️ Настроить", callback_data=QuickAdjustCB())
+    kb.button(text="✖️ Отмена", callback_data=CancelCB())
+    kb.adjust(2, 1)
+    return kb.as_markup()
+
+
+def quick_room_picker_kb(rooms: list[Room]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for room in rooms:
+        kb.button(text=room.title[:40], callback_data=QuickRoomCB(room_id=room.id))
+    kb.button(text="✖️ Отмена", callback_data=CancelCB())
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def history_kb(page: HistoryPage, room_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    for item in page.items:
+    for i, item in enumerate(page.items, start=1):
         kb.button(
-            text=formatters.history_button(item.kind, item.description, item.amount, page.currency),
+            text=str(i),
             callback_data=ExpCB(action=ExpAction.VIEW, expense_id=item.expense_id),
         )
-    kb.adjust(1)
+    kb.adjust(4)
     if page.total_pages > 1:
         nav = InlineKeyboardBuilder()
         if page.page > 0:

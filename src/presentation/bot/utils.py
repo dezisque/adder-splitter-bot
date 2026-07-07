@@ -10,6 +10,29 @@ from src.presentation.bot import texts
 
 _AMOUNT_RE = re.compile(r"^\d{1,8}([.,]\d{1,2})?$")
 
+# «Мясо 2450», «мясо и уголь 2 450,50 руб» — описание + сумма в конце.
+# desc ленивый: сумма ищется с самого левого валидного места, иначе
+# жадное описание съедало бы «2» из «2 450,50»
+_QUICK_RE = re.compile(
+    r"^(?P<desc>.+?)\s+(?P<amount>\d[\d  ]*(?:[.,]\d{1,2})?)\s*(?:₽|р\.?|руб\.?|рублей)?$",
+    re.IGNORECASE,
+)
+
+
+def is_amount_only(text: str) -> bool:
+    """Сообщение состоит из одной суммы — описания нет."""
+    normalized = text.strip().replace(" ", "").replace(" ", "")
+    return bool(_AMOUNT_RE.match(normalized))
+
+
+def parse_quick_expense(text: str) -> tuple[str, int | None]:
+    """«Мясо 2450» -> («Мясо», 245000); без суммы -> (текст, None)."""
+    text = text.strip()
+    match = _QUICK_RE.match(text)
+    if match:
+        return match.group("desc").strip(), parse_amount(match.group("amount"))
+    return text, None
+
 
 def parse_amount(text: str) -> int:
     """«2450», «2450.5», «2 450,50» -> копейки. Никаких float."""

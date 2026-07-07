@@ -23,6 +23,10 @@ class EditExpense(StatesGroup):
     split = State()
 
 
+class QuickAdd(StatesGroup):
+    room = State()  # черновик «Мясо 2450» ждёт выбора комнаты
+
+
 class AddRepayment(StatesGroup):
     payer = State()  # room_id — в данных состояния
     recipient = State()

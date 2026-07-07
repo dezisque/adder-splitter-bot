@@ -12,6 +12,7 @@ def _to_domain(model: UserModel) -> User:
         username=model.username,
         first_name=model.first_name,
         created_at=model.created_at,
+        current_room_id=model.current_room_id,
     )
 
 
@@ -40,4 +41,9 @@ class SqlUserRepo:
             update(UserModel)
             .where(UserModel.id == user_id)
             .values(username=username, first_name=first_name)
+        )
+
+    async def set_current_room(self, user_id: int, room_id: int | None) -> None:
+        await self._session.execute(
+            update(UserModel).where(UserModel.id == user_id).values(current_room_id=room_id)
         )

@@ -112,6 +112,16 @@ class RepayAmountCB(CallbackData, prefix="ra"):
     amount: int
 
 
+class QuickRoomCB(CallbackData, prefix="qr"):
+    """Выбор комнаты для быстрого ввода, когда «текущая» неизвестна."""
+
+    room_id: int
+
+
+class QuickAdjustCB(CallbackData, prefix="qadj"):
+    """«Настроить» в превью быстрого ввода: выбор плательщика и делёжки."""
+
+
 class KeepRoomCB(CallbackData, prefix="keep"):
     """«Оставить» из уведомления об авто-удалении: сбрасывает таймер."""
 

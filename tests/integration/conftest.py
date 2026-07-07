@@ -53,7 +53,7 @@ async def services() -> AsyncIterator[Services]:
         expenses = SqlExpenseRepo(session)
         yield Services(
             session=session,
-            rooms=RoomService(rooms, participants, expenses),
+            rooms=RoomService(rooms, participants, expenses, users),
             members=MemberService(rooms, participants),
             expenses=ExpenseService(rooms, participants, expenses, users),
             balance=BalanceService(rooms, participants, expenses),

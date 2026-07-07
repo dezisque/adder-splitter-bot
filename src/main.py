@@ -14,7 +14,15 @@ from src.config import Settings
 from src.infrastructure.db.session import create_engine, create_session_factory
 from src.presentation.bot import texts
 from src.presentation.bot.cleanup import cleanup_loop
-from src.presentation.bot.handlers import balance, common, expenses, members, rooms, start
+from src.presentation.bot.handlers import (
+    balance,
+    common,
+    expenses,
+    members,
+    quick_add,
+    rooms,
+    start,
+)
 from src.presentation.bot.middlewares.di import DiMiddleware
 from src.presentation.bot.middlewares.user_upsert import UserUpsertMiddleware
 
@@ -39,13 +47,14 @@ def create_dispatcher(
     dp = Dispatcher(storage=_create_storage(settings))
     dp.update.middleware(DiMiddleware(session_factory))
     dp.update.middleware(UserUpsertMiddleware())
-    # common подключается последним: в нём catch-all для устаревших кнопок
+    # quick_add перехватывает свободный текст, common (catch-all) — строго последним
     dp.include_routers(
         start.router,
         rooms.router,
         members.router,
         expenses.router,
         balance.router,
+        quick_add.router,
         common.router,
     )
     dp.startup.register(_on_startup)

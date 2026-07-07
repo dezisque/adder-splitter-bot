@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from src.domain.entities import Expense, Participant, Room
 from src.domain.enums import ExpenseKind
@@ -39,6 +40,8 @@ class HistoryItem:
     kind: ExpenseKind
     description: str
     amount: int
+    payer_name: str
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

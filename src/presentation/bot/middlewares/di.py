@@ -34,7 +34,7 @@ class DiMiddleware(BaseMiddleware):
             participants = SqlParticipantRepo(session)
             expenses = SqlExpenseRepo(session)
             data["user_service"] = UserService(users)
-            data["room_service"] = RoomService(rooms, participants, expenses)
+            data["room_service"] = RoomService(rooms, participants, expenses, users)
             data["member_service"] = MemberService(rooms, participants)
             data["expense_service"] = ExpenseService(rooms, participants, expenses, users)
             data["balance_service"] = BalanceService(rooms, participants, expenses)
