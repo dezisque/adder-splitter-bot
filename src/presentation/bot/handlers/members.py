@@ -24,11 +24,11 @@ async def cb_members(
     member_service: MemberService,
 ) -> None:
     overview = await room_service.get_overview(user, callback_data.room_id)
-    participants = await member_service.list_members(user, callback_data.room_id)
+    members = await member_service.list_members_view(user, callback_data.room_id)
     await edit_or_answer(
         callback,
-        formatters.members_list(overview.room, participants),
-        members_kb(overview, participants),
+        formatters.members_list(overview.room, members),
+        members_kb(overview, [m.participant for m in members]),
     )
     await callback.answer()
 
@@ -56,10 +56,10 @@ async def add_virtual_name(
     await member_service.add_virtual(user, room_id, message.text or "")
     await state.clear()
     overview = await room_service.get_overview(user, room_id)
-    participants = await member_service.list_members(user, room_id)
+    members = await member_service.list_members_view(user, room_id)
     await message.answer(
-        formatters.members_list(overview.room, participants),
-        reply_markup=members_kb(overview, participants),
+        formatters.members_list(overview.room, members),
+        reply_markup=members_kb(overview, [m.participant for m in members]),
     )
 
 
@@ -98,10 +98,10 @@ async def cb_remove_member_yes(
 ) -> None:
     await member_service.remove_member(user, callback_data.room_id, callback_data.participant_id)
     overview = await room_service.get_overview(user, callback_data.room_id)
-    participants = await member_service.list_members(user, callback_data.room_id)
+    members = await member_service.list_members_view(user, callback_data.room_id)
     await edit_or_answer(
         callback,
-        formatters.members_list(overview.room, participants),
-        members_kb(overview, participants),
+        formatters.members_list(overview.room, members),
+        members_kb(overview, [m.participant for m in members]),
     )
     await callback.answer("Участник удалён")

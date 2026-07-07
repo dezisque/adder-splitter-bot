@@ -1,3 +1,4 @@
+from src.application.dto import MemberView
 from src.application.interfaces import ParticipantRepo, RoomRepo
 from src.application.services._access import ensure_owner, ensure_writable, get_room_and_member
 from src.domain import limits
@@ -25,12 +26,14 @@ class MemberService:
                 return room, False
             # выходил раньше — возвращаем того же участника, история сохранена
             await self._participants.set_active(existing.id, True)
+            await self._rooms.touch_activity(room.id)
             return room, True
         if await self._participants.count_active(room.id) >= limits.MAX_MEMBERS_PER_ROOM:
             raise LimitExceeded(MEMBERS_LIMIT_MESSAGE)
         await self._participants.add(
             room.id, user.id, user.first_name[: limits.MAX_MEMBER_NAME_LEN]
         )
+        await self._rooms.touch_activity(room.id)
         return room, True
 
     async def add_virtual(self, actor: User, room_id: int, name: str) -> Participant:
@@ -43,13 +46,21 @@ class MemberService:
             )
         if await self._participants.count_active(room.id) >= limits.MAX_MEMBERS_PER_ROOM:
             raise LimitExceeded(MEMBERS_LIMIT_MESSAGE)
-        return await self._participants.add(room.id, None, name)
+        participant = await self._participants.add(room.id, None, name)
+        await self._rooms.touch_activity(room.id)
+        return participant
 
     async def list_members(
         self, user: User, room_id: int, include_inactive: bool = False
     ) -> list[Participant]:
         await get_room_and_member(self._rooms, self._participants, user, room_id)
         return await self._participants.list_by_room(room_id, include_inactive)
+
+    async def list_members_view(self, user: User, room_id: int) -> list[MemberView]:
+        """Активные участники с username привязанных аккаунтов."""
+        await get_room_and_member(self._rooms, self._participants, user, room_id)
+        rows = await self._participants.list_with_usernames(room_id)
+        return [MemberView(participant=p, username=username) for p, username in rows]
 
     async def leave(self, user: User, room_id: int) -> None:
         room, me = await get_room_and_member(self._rooms, self._participants, user, room_id)

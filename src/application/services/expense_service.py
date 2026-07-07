@@ -67,6 +67,7 @@ class ExpenseService:
         if await self._expenses.count(room.id) >= limits.MAX_EXPENSES_PER_ROOM:
             raise LimitExceeded("Достигнут лимит записей в комнате")
         shares = split_evenly(amount, participant_ids)
+        await self._rooms.touch_activity(room.id)
         return await self._expenses.add(
             room_id=room.id,
             kind=ExpenseKind.EXPENSE,
@@ -96,6 +97,7 @@ class ExpenseService:
         active = await self._active_map(room.id)
         if from_participant_id not in active or to_participant_id not in active:
             raise InvalidInput("Участник не найден — попробуйте заново")
+        await self._rooms.touch_activity(room.id)
         return await self._expenses.add(
             room_id=room.id,
             kind=ExpenseKind.REPAYMENT,
@@ -121,6 +123,8 @@ class ExpenseService:
         if not can_edit:
             raise AccessDenied("Изменять запись может только её автор или владелец комнаты")
         ensure_writable(room)
+        # правка записи — тоже активность комнаты
+        await self._rooms.touch_activity(room.id)
         return expense, room
 
     async def get_card(self, actor: User, expense_id: int) -> ExpenseCard:

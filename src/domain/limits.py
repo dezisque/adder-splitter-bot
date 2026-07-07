@@ -14,4 +14,9 @@ MAX_EXPENSE_DESCRIPTION_LEN = 128
 INVITE_TOKEN_BYTES = 16
 EXPENSES_PAGE_SIZE = 8
 
+# авто-удаление брошенных комнат (архивные не трогаем)
+ROOM_INACTIVITY_DAYS = 3  # без активности -> предупреждение владельцу
+ROOM_DELETION_GRACE_DAYS = 3  # после предупреждения -> удаление
+CLEANUP_INTERVAL_SECONDS = 3600
+
 DEFAULT_CURRENCY = "RUB"

@@ -1,17 +1,20 @@
+from html import escape
+
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from src.application.services.balance_service import BalanceService
 from src.application.services.member_service import MemberService
 from src.application.services.room_service import RoomService
-from src.domain.entities import User
+from src.domain.entities import Room, User
 from src.presentation.bot import formatters, texts
-from src.presentation.bot.callbacks import MenuCB, MenuTarget, RoomAction, RoomCB
+from src.presentation.bot.callbacks import KeepRoomCB, MenuCB, MenuTarget, RoomAction, RoomCB
 from src.presentation.bot.keyboards.expense import cancel_kb
 from src.presentation.bot.keyboards.menu import main_menu_kb
 from src.presentation.bot.keyboards.room import (
+    archived_rooms_kb,
     confirm_kb,
     invite_kb,
     room_card_kb,
@@ -22,6 +25,13 @@ from src.presentation.bot.states import CreateRoom
 from src.presentation.bot.utils import edit_or_answer
 
 router = Router(name="rooms")
+
+
+def _rooms_screen(rooms: list[Room]) -> tuple[str, InlineKeyboardMarkup]:
+    """Список комнат: активные + папка «Архив», если есть что прятать."""
+    active = [r for r in rooms if not r.is_archived]
+    text = texts.ROOMS_LIST if rooms else texts.NO_ROOMS
+    return text, rooms_list_kb(active, archived_count=len(rooms) - len(active))
 
 
 # ---------- навигация ----------
@@ -38,18 +48,21 @@ async def cmd_rooms(
     message: Message, state: FSMContext, user: User, room_service: RoomService
 ) -> None:
     await state.clear()
-    rooms = await room_service.list_for_user(user)
-    await message.answer(
-        texts.ROOMS_LIST if rooms else texts.NO_ROOMS, reply_markup=rooms_list_kb(rooms)
-    )
+    text, kb = _rooms_screen(await room_service.list_for_user(user))
+    await message.answer(text, reply_markup=kb)
 
 
 @router.callback_query(MenuCB.filter(F.to == MenuTarget.ROOMS))
 async def cb_rooms(callback: CallbackQuery, user: User, room_service: RoomService) -> None:
-    rooms = await room_service.list_for_user(user)
-    await edit_or_answer(
-        callback, texts.ROOMS_LIST if rooms else texts.NO_ROOMS, rooms_list_kb(rooms)
-    )
+    text, kb = _rooms_screen(await room_service.list_for_user(user))
+    await edit_or_answer(callback, text, kb)
+    await callback.answer()
+
+
+@router.callback_query(MenuCB.filter(F.to == MenuTarget.ARCHIVED))
+async def cb_rooms_archived(callback: CallbackQuery, user: User, room_service: RoomService) -> None:
+    archived = [r for r in await room_service.list_for_user(user) if r.is_archived]
+    await edit_or_answer(callback, texts.ARCHIVED_LIST, archived_rooms_kb(archived))
     await callback.answer()
 
 
@@ -88,6 +101,29 @@ async def cb_room_open(
 ) -> None:
     overview = await room_service.get_overview(user, callback_data.room_id)
     await edit_or_answer(callback, formatters.room_card(overview), room_card_kb(overview))
+    await callback.answer()
+
+
+@router.callback_query(RoomCB.filter(F.action == RoomAction.REFRESH))
+async def cb_room_refresh(
+    callback: CallbackQuery, callback_data: RoomCB, user: User, room_service: RoomService
+) -> None:
+    overview = await room_service.get_overview(user, callback_data.room_id)
+    await edit_or_answer(callback, formatters.room_card(overview), room_card_kb(overview))
+    await callback.answer("Обновлено ✅")
+
+
+@router.callback_query(KeepRoomCB.filter())
+async def cb_keep_room(
+    callback: CallbackQuery, callback_data: KeepRoomCB, user: User, room_service: RoomService
+) -> None:
+    await room_service.keep_alive(user, callback_data.room_id)
+    overview = await room_service.get_overview(user, callback_data.room_id)
+    await edit_or_answer(
+        callback,
+        f"{texts.ROOM_KEPT}\n\n{formatters.room_card(overview)}",
+        room_card_kb(overview),
+    )
     await callback.answer()
 
 
@@ -164,6 +200,37 @@ async def cb_archive_yes(
     await callback.answer("Комната в архиве")
 
 
+# ---------- удаление комнаты ----------
+
+
+@router.callback_query(RoomCB.filter(F.action == RoomAction.DELETE))
+async def cb_delete_room(
+    callback: CallbackQuery, callback_data: RoomCB, user: User, room_service: RoomService
+) -> None:
+    overview = await room_service.get_overview(user, callback_data.room_id)
+    title = escape(overview.room.title)
+    await edit_or_answer(
+        callback,
+        f"Удалить комнату «{title}» <b>безвозвратно</b>?\n\n"
+        "Все расходы, участники и история будут стёрты. Отменить это нельзя.",
+        confirm_kb(
+            yes=RoomCB(action=RoomAction.DELETE_YES, room_id=callback_data.room_id),
+            no=RoomCB(action=RoomAction.SETTINGS, room_id=callback_data.room_id),
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(RoomCB.filter(F.action == RoomAction.DELETE_YES))
+async def cb_delete_room_yes(
+    callback: CallbackQuery, callback_data: RoomCB, user: User, room_service: RoomService
+) -> None:
+    await room_service.delete(user, callback_data.room_id)
+    text, kb = _rooms_screen(await room_service.list_for_user(user))
+    await edit_or_answer(callback, f"🗑 Комната удалена.\n\n{text}", kb)
+    await callback.answer("Комната удалена")
+
+
 # ---------- выход из комнаты ----------
 
 
@@ -188,7 +255,7 @@ async def cb_leave(
         f"Выйти из комнаты?{warning}",
         confirm_kb(
             yes=RoomCB(action=RoomAction.LEAVE_YES, room_id=room_id),
-            no=RoomCB(action=RoomAction.SETTINGS, room_id=room_id),
+            no=RoomCB(action=RoomAction.OPEN, room_id=room_id),
         ),
     )
     await callback.answer()
@@ -203,10 +270,6 @@ async def cb_leave_yes(
     room_service: RoomService,
 ) -> None:
     await member_service.leave(user, callback_data.room_id)
-    rooms = await room_service.list_for_user(user)
-    await edit_or_answer(
-        callback,
-        "Вы вышли из комнаты.\n\n" + (texts.ROOMS_LIST if rooms else texts.NO_ROOMS),
-        rooms_list_kb(rooms),
-    )
+    text, kb = _rooms_screen(await room_service.list_for_user(user))
+    await edit_or_answer(callback, f"Вы вышли из комнаты.\n\n{text}", kb)
     await callback.answer()

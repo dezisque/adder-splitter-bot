@@ -44,7 +44,7 @@ def payer_kb(participants: list[Participant], suggested_id: int) -> InlineKeyboa
 def split_kb(participants: list[Participant], selected: set[int]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for p in participants:
-        mark = "☑️" if p.id in selected else "⬜️"
+        mark = "✅" if p.id in selected else "⬜️"
         kb.button(
             text=f"{mark} {formatters.button_name(p)}",
             callback_data=SplitCB(action=SplitAction.TOGGLE, participant_id=p.id),
@@ -54,7 +54,7 @@ def split_kb(participants: list[Participant], selected: set[int]) -> InlineKeybo
     ctrl.button(
         text="Выбрать всех", callback_data=SplitCB(action=SplitAction.ALL, participant_id=0)
     )
-    ctrl.button(text="✅ Готово", callback_data=SplitCB(action=SplitAction.DONE, participant_id=0))
+    ctrl.button(text="➡️ Готово", callback_data=SplitCB(action=SplitAction.DONE, participant_id=0))
     ctrl.button(text="✖️ Отмена", callback_data=CancelCB())
     ctrl.adjust(2, 1)
     kb.attach(ctrl)

@@ -2,7 +2,8 @@
 
 from html import escape
 
-from src.application.dto import BalanceView, ExpenseCard, RoomOverview
+from src.application.dto import BalanceView, ExpenseCard, MemberView, RoomOverview
+from src.domain import limits
 from src.domain.entities import Participant, Room
 from src.domain.enums import ExpenseKind
 from src.domain.value_objects import Money
@@ -39,19 +40,36 @@ def room_card(o: RoomOverview) -> str:
     )
 
 
-def members_list(room: Room, participants: list[Participant]) -> str:
+def members_list(room: Room, members: list[MemberView]) -> str:
     lines = [f"<b>Участники «{escape(room.title)}»</b>\n"]
     has_virtual = False
-    for p in participants:
-        marks = ""
-        if p.user_id == room.owner_user_id:
-            marks = f" {OWNER_MARK}"
+    for v in members:
+        p = v.participant
         if p.is_virtual:
             has_virtual = True
-        lines.append(f"• {name(p)}{marks}")
+            label = name(p)
+        elif v.username:
+            label = f"@{escape(v.username)} ({escape(p.display_name)})"
+        else:
+            label = escape(p.display_name)
+        owner_mark = f" {OWNER_MARK}" if p.user_id == room.owner_user_id else ""
+        lines.append(f"• {label}{owner_mark}")
     if has_virtual:
         lines.append(f"\n{VIRTUAL_MARK} — без Telegram, добавлен вручную")
     return "\n".join(lines)
+
+
+def inactive_room_notice(room: Room) -> str:
+    return (
+        f"😴 В комнате «{escape(room.title)}» нет активности уже "
+        f"{limits.ROOM_INACTIVITY_DAYS} дн.\n\n"
+        f"Если ничего не сделать, через {limits.ROOM_DELETION_GRACE_DAYS} дн. "
+        "я удалю её вместе со всей историей. Что делаем?"
+    )
+
+
+def room_auto_deleted(room: Room) -> str:
+    return f"🗑 Комната «{escape(room.title)}» удалена — в ней долго не было активности."
 
 
 def invite_text(room: Room, link: str) -> str:

@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from src.domain.exceptions import AccessDenied
+from src.domain.exceptions import AccessDenied, NotFound
 from tests.integration.conftest import Services, make_user
 
 pytestmark = pytest.mark.skipif(
@@ -162,6 +162,92 @@ async def test_archive_blocks_changes(services: Services) -> None:
     danil = await make_user(services, 4003, "Данил")
     with pytest.raises(AccessDenied):
         await services.members.join_by_token(danil, room.invite_token)
+
+
+async def test_delete_room_wipes_everything(services: Services) -> None:
+    igor = await make_user(services, 6001, "Игорь")
+    masha = await make_user(services, 6002, "Маша")
+    room = await services.rooms.create(igor, "Снести")
+    await services.members.join_by_token(masha, room.invite_token)
+    members = await services.members.list_members(igor, room.id)
+    await services.expenses.add(
+        igor,
+        room_id=room.id,
+        payer_participant_id=members[0].id,
+        amount=1000,
+        description="Кофе",
+        participant_ids=[m.id for m in members],
+    )
+
+    with pytest.raises(AccessDenied):
+        await services.rooms.delete(masha, room.id)  # не владелец
+
+    await services.rooms.delete(igor, room.id)
+    assert await services.rooms.list_for_user(igor) == []
+    with pytest.raises(NotFound):
+        await services.rooms.get_overview(igor, room.id)
+
+
+async def test_inactivity_lifecycle(services: Services) -> None:
+    """Неактивная комната: предупреждение -> грейс -> удаление; активность спасает."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from src.infrastructure.db.models import RoomModel
+    from src.infrastructure.db.repositories.room_repo import SqlRoomRepo
+
+    igor = await make_user(services, 7001, "Игорь")
+    room = await services.rooms.create(igor, "Тихая")
+    repo = SqlRoomRepo(services.session)
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=3)
+
+    # свежая комната под раздачу не попадает
+    assert await repo.list_to_notify(cutoff) == []
+
+    await services.session.execute(
+        update(RoomModel)
+        .where(RoomModel.id == room.id)
+        .values(last_activity_at=now - timedelta(days=4))
+    )
+    assert [r.id for r in await repo.list_to_notify(cutoff)] == [room.id]
+
+    await repo.mark_deletion_notified(room.id)
+    assert await repo.list_to_notify(cutoff) == []
+    assert await repo.list_to_delete(cutoff) == []  # грейс ещё не истёк
+
+    await services.session.execute(
+        update(RoomModel)
+        .where(RoomModel.id == room.id)
+        .values(deletion_notified_at=now - timedelta(days=4))
+    )
+    assert [r.id for r in await repo.list_to_delete(cutoff)] == [room.id]
+
+    # «Оставить» (или любая активность) снимает приговор
+    await services.rooms.keep_alive(igor, room.id)
+    assert await repo.list_to_delete(cutoff) == []
+    assert await repo.list_to_notify(cutoff) == []
+
+    # архивная комната не удаляется, даже если совсем старая
+    await services.session.execute(
+        update(RoomModel)
+        .where(RoomModel.id == room.id)
+        .values(last_activity_at=now - timedelta(days=30), is_archived=True)
+    )
+    assert await repo.list_to_notify(cutoff) == []
+
+
+async def test_members_view_has_usernames(services: Services) -> None:
+    igor = await services.users.create(8001, "igor_k", "Игорь")
+    room = await services.rooms.create(igor, "Юзернеймы")
+    await services.members.add_virtual(igor, room.id, "Серёга")
+
+    views = await services.members.list_members_view(igor, room.id)
+    by_name = {v.participant.display_name: v for v in views}
+    assert by_name["Игорь"].username == "igor_k"
+    assert by_name["Серёга"].username is None
+    assert by_name["Серёга"].participant.is_virtual
 
 
 async def test_leave_and_rejoin_keeps_participant(services: Services) -> None:

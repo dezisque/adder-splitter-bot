@@ -7,6 +7,7 @@ class MenuTarget(StrEnum):
     MAIN = "main"
     ROOMS = "rooms"
     NEW_ROOM = "new"
+    ARCHIVED = "arch"
 
 
 class MenuCB(CallbackData, prefix="m"):
@@ -17,6 +18,7 @@ class MenuCB(CallbackData, prefix="m"):
 
 class RoomAction(StrEnum):
     OPEN = "open"
+    REFRESH = "rfr"
     INVITE = "inv"
     INVITE_REGEN = "invr"
     MEMBERS = "mem"
@@ -25,6 +27,8 @@ class RoomAction(StrEnum):
     SETTINGS = "set"
     ARCHIVE = "arc"
     ARCHIVE_YES = "arcy"
+    DELETE = "del"
+    DELETE_YES = "dely"
     LEAVE = "lv"
     LEAVE_YES = "lvy"
     ADD_EXPENSE = "exp"
@@ -100,6 +104,18 @@ class RepayFromCB(CallbackData, prefix="rf"):
 
 class RepayToCB(CallbackData, prefix="rt"):
     participant_id: int
+
+
+class RepayAmountCB(CallbackData, prefix="ra"):
+    """Кнопка «вся сумма» — возврат ровно на сумму долга по расчёту."""
+
+    amount: int
+
+
+class KeepRoomCB(CallbackData, prefix="keep"):
+    """«Оставить» из уведомления об авто-удалении: сбрасывает таймер."""
+
+    room_id: int
 
 
 class ConfirmCB(CallbackData, prefix="ok"):

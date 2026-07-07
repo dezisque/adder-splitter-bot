@@ -8,13 +8,19 @@ from src.application.services.member_service import MemberService
 from src.application.services.room_service import RoomService
 from src.domain.entities import User
 from src.presentation.bot import formatters, texts
-from src.presentation.bot.callbacks import RepayFromCB, RepayToCB, RoomAction, RoomCB
+from src.presentation.bot.callbacks import (
+    RepayAmountCB,
+    RepayFromCB,
+    RepayToCB,
+    RoomAction,
+    RoomCB,
+)
 from src.presentation.bot.keyboards.balance import (
     balance_kb,
+    repay_amount_kb,
     repay_payer_kb,
     repay_recipient_kb,
 )
-from src.presentation.bot.keyboards.expense import cancel_kb
 from src.presentation.bot.states import AddRepayment
 from src.presentation.bot.utils import edit_or_answer, parse_amount
 
@@ -102,11 +108,31 @@ async def cb_repay_to(
         ),
         None,
     )
-    hint = "Какую сумму вернули?"
-    if suggestion is not None:
+    hint = "Какую сумму вернули? Введите её или нажмите кнопку:"
+    if suggestion is None:
+        hint = "Какую сумму вернули?"
+    else:
         hint += f"\n\nПо расчёту долг: <b>{formatters.money(suggestion, view.room.currency)}</b>"
-    await edit_or_answer(callback, hint, cancel_kb())
+    await edit_or_answer(callback, hint, repay_amount_kb(suggestion, view.room.currency))
     await callback.answer()
+
+
+async def _save_repayment(
+    user: User,
+    data: dict[str, int],
+    amount: int,
+    expense_service: ExpenseService,
+    balance_service: BalanceService,
+) -> str:
+    await expense_service.add_repayment(
+        user,
+        room_id=data["room_id"],
+        from_participant_id=data["from_id"],
+        to_participant_id=data["to_id"],
+        amount=amount,
+    )
+    view = await balance_service.get(user, data["room_id"])
+    return f"{texts.REPAY_SAVED}\n\n{formatters.balance(view)}"
 
 
 @router.message(AddRepayment.amount, F.text)
@@ -119,16 +145,22 @@ async def repay_amount(
 ) -> None:
     amount = parse_amount(message.text or "")
     data = await state.get_data()
-    await expense_service.add_repayment(
-        user,
-        room_id=data["room_id"],
-        from_participant_id=data["from_id"],
-        to_participant_id=data["to_id"],
-        amount=amount,
-    )
+    text = await _save_repayment(user, data, amount, expense_service, balance_service)
     await state.clear()
-    view = await balance_service.get(user, data["room_id"])
-    await message.answer(
-        f"{texts.REPAY_SAVED}\n\n{formatters.balance(view)}",
-        reply_markup=balance_kb(data["room_id"], can_repay=True),
-    )
+    await message.answer(text, reply_markup=balance_kb(data["room_id"], can_repay=True))
+
+
+@router.callback_query(AddRepayment.amount, RepayAmountCB.filter())
+async def repay_amount_button(
+    callback: CallbackQuery,
+    callback_data: RepayAmountCB,
+    state: FSMContext,
+    user: User,
+    expense_service: ExpenseService,
+    balance_service: BalanceService,
+) -> None:
+    data = await state.get_data()
+    text = await _save_repayment(user, data, callback_data.amount, expense_service, balance_service)
+    await state.clear()
+    await edit_or_answer(callback, text, balance_kb(data["room_id"], can_repay=True))
+    await callback.answer(texts.REPAY_SAVED)

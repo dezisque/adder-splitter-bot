@@ -1,8 +1,11 @@
+from datetime import datetime
+
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities import Room
-from src.infrastructure.db.models import ParticipantModel, RoomModel
+from src.infrastructure.db.models import ExpenseModel, ParticipantModel, RoomModel, utcnow
 
 
 def _to_domain(model: RoomModel) -> Room:
@@ -14,6 +17,8 @@ def _to_domain(model: RoomModel) -> Room:
         currency=model.currency,
         is_archived=model.is_archived,
         created_at=model.created_at,
+        last_activity_at=model.last_activity_at,
+        deletion_notified_at=model.deletion_notified_at,
     )
 
 
@@ -73,3 +78,44 @@ class SqlRoomRepo:
         await self._session.execute(
             update(RoomModel).where(RoomModel.id == room_id).values(invite_token=token)
         )
+
+    async def delete(self, room_id: int) -> None:
+        # порядок важен: expenses ссылаются на participants;
+        # expense_shares уходят каскадом на уровне БД
+        await self._session.execute(sql_delete(ExpenseModel).where(ExpenseModel.room_id == room_id))
+        await self._session.execute(
+            sql_delete(ParticipantModel).where(ParticipantModel.room_id == room_id)
+        )
+        await self._session.execute(sql_delete(RoomModel).where(RoomModel.id == room_id))
+
+    async def touch_activity(self, room_id: int) -> None:
+        await self._session.execute(
+            update(RoomModel)
+            .where(RoomModel.id == room_id)
+            .values(last_activity_at=utcnow(), deletion_notified_at=None)
+        )
+
+    async def mark_deletion_notified(self, room_id: int) -> None:
+        await self._session.execute(
+            update(RoomModel).where(RoomModel.id == room_id).values(deletion_notified_at=utcnow())
+        )
+
+    async def list_to_notify(self, inactive_since: datetime) -> list[Room]:
+        models = await self._session.scalars(
+            select(RoomModel).where(
+                ~RoomModel.is_archived,
+                RoomModel.deletion_notified_at.is_(None),
+                RoomModel.last_activity_at < inactive_since,
+            )
+        )
+        return [_to_domain(m) for m in models]
+
+    async def list_to_delete(self, notified_before: datetime) -> list[Room]:
+        models = await self._session.scalars(
+            select(RoomModel).where(
+                ~RoomModel.is_archived,
+                RoomModel.deletion_notified_at.is_not(None),
+                RoomModel.deletion_notified_at < notified_before,
+            )
+        )
+        return [_to_domain(m) for m in models]

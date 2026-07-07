@@ -60,6 +60,17 @@ class RoomService:
         ensure_owner(room, user)
         await self._rooms.set_archived(room_id, True)
 
+    async def keep_alive(self, user: User, room_id: int) -> None:
+        """Сбрасывает таймер авто-удаления (кнопка «Оставить» в уведомлении)."""
+        await get_room_and_member(self._rooms, self._participants, user, room_id)
+        await self._rooms.touch_activity(room_id)
+
+    async def delete(self, user: User, room_id: int) -> None:
+        """Безвозвратно удаляет комнату со всеми расходами. Только владелец."""
+        room, _ = await get_room_and_member(self._rooms, self._participants, user, room_id)
+        ensure_owner(room, user)
+        await self._rooms.delete(room_id)
+
     async def regenerate_invite(self, user: User, room_id: int) -> str:
         room, _ = await get_room_and_member(self._rooms, self._participants, user, room_id)
         ensure_owner(room, user)

@@ -15,6 +15,14 @@ class RoomOverview:
 
 
 @dataclass(frozen=True, slots=True)
+class MemberView:
+    """Участник + username привязанного Telegram-аккаунта (для экрана участников)."""
+
+    participant: Participant
+    username: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ExpenseCard:
     expense: Expense
     room: Room

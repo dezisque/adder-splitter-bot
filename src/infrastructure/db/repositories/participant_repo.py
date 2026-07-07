@@ -2,7 +2,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities import Participant
-from src.infrastructure.db.models import ParticipantModel
+from src.infrastructure.db.models import ParticipantModel, UserModel
 
 
 def _to_domain(model: ParticipantModel) -> Participant:
@@ -43,6 +43,20 @@ class SqlParticipantRepo:
             stmt = stmt.where(ParticipantModel.is_active)
         stmt = stmt.order_by(ParticipantModel.id)
         return [_to_domain(m) for m in await self._session.scalars(stmt)]
+
+    async def list_with_usernames(
+        self, room_id: int, include_inactive: bool = False
+    ) -> list[tuple[Participant, str | None]]:
+        stmt = (
+            select(ParticipantModel, UserModel.username)
+            .join(UserModel, ParticipantModel.user_id == UserModel.id, isouter=True)
+            .where(ParticipantModel.room_id == room_id)
+        )
+        if not include_inactive:
+            stmt = stmt.where(ParticipantModel.is_active)
+        stmt = stmt.order_by(ParticipantModel.id)
+        rows = await self._session.execute(stmt)
+        return [(_to_domain(row[0]), row[1]) for row in rows]
 
     async def count_active(self, room_id: int) -> int:
         count = await self._session.scalar(

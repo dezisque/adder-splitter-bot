@@ -8,9 +8,12 @@ from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BotCommand
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
 from src.infrastructure.db.session import create_engine, create_session_factory
+from src.presentation.bot import texts
+from src.presentation.bot.cleanup import cleanup_loop
 from src.presentation.bot.handlers import balance, common, expenses, members, rooms, start
 from src.presentation.bot.middlewares.di import DiMiddleware
 from src.presentation.bot.middlewares.user_upsert import UserUpsertMiddleware
@@ -30,10 +33,9 @@ def _create_storage(settings: Settings) -> BaseStorage:
     return MemoryStorage()
 
 
-def create_dispatcher(settings: Settings) -> Dispatcher:
-    engine = create_engine(settings.database_url)
-    session_factory = create_session_factory(engine)
-
+def create_dispatcher(
+    settings: Settings, session_factory: async_sessionmaker[AsyncSession]
+) -> Dispatcher:
     dp = Dispatcher(storage=_create_storage(settings))
     dp.update.middleware(DiMiddleware(session_factory))
     dp.update.middleware(UserUpsertMiddleware())
@@ -52,6 +54,9 @@ def create_dispatcher(settings: Settings) -> Dispatcher:
 
 async def _on_startup(bot: Bot) -> None:
     await bot.set_my_commands(BOT_COMMANDS)
+    # экран «Что умеет этот бот?» до нажатия «Запустить»
+    await bot.set_my_description(texts.BOT_DESCRIPTION)
+    await bot.set_my_short_description(texts.BOT_SHORT_DESCRIPTION)
 
 
 async def main() -> None:
@@ -60,9 +65,15 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     settings = Settings()
+    engine = create_engine(settings.database_url)
+    session_factory = create_session_factory(engine)
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = create_dispatcher(settings)
-    await dp.start_polling(bot)
+    dp = create_dispatcher(settings, session_factory)
+    cleanup_task = asyncio.create_task(cleanup_loop(bot, session_factory))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        cleanup_task.cancel()
 
 
 if __name__ == "__main__":

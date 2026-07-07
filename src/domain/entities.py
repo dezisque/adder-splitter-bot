@@ -25,6 +25,8 @@ class Room:
     currency: str
     is_archived: bool
     created_at: datetime
+    last_activity_at: datetime
+    deletion_notified_at: datetime | None
 
 
 @dataclass(slots=True)

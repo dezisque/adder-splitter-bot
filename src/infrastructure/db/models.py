@@ -45,6 +45,10 @@ class RoomModel(Base):
         String(3), default=limits.DEFAULT_CURRENCY, server_default=text("'RUB'")
     )
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+    deletion_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now()
     )
