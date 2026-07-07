@@ -17,7 +17,7 @@ def balance_kb(room_id: int, can_repay: bool) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if can_repay:
         kb.button(
-            text="✅ Отметить возврат",
+            text="↩️ Отметить возврат",
             callback_data=RoomCB(action=RoomAction.REPAY, room_id=room_id),
         )
     kb.button(text="⬅️ К комнате", callback_data=RoomCB(action=RoomAction.OPEN, room_id=room_id))
@@ -28,9 +28,9 @@ def balance_kb(room_id: int, can_repay: bool) -> InlineKeyboardMarkup:
 def repay_payer_kb(participants: list[Participant], self_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for p in participants:
-        mark = "👉 " if p.id == self_id else ""
+        suffix = " (вы)" if p.id == self_id else ""
         kb.button(
-            text=f"{mark}{formatters.button_name(p)}",
+            text=f"{formatters.button_name(p)}{suffix}",
             callback_data=RepayFromCB(participant_id=p.id),
         )
     kb.adjust(2)

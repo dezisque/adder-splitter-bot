@@ -8,8 +8,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError
-from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.domain import limits
@@ -17,6 +15,7 @@ from src.infrastructure.db.repositories.room_repo import SqlRoomRepo
 from src.infrastructure.db.repositories.user_repo import SqlUserRepo
 from src.presentation.bot import formatters
 from src.presentation.bot.keyboards.room import inactive_room_kb
+from src.presentation.bot.notifications import send_safe
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ async def run_cleanup_once(bot: Bot, session_factory: async_sessionmaker[AsyncSe
         for room in await rooms.list_to_notify(inactive_cutoff):
             owner = await users.get(room.owner_user_id)
             if owner is not None:
-                await _send_safe(
+                await send_safe(
                     bot,
                     owner.telegram_id,
                     formatters.inactive_room_notice(room),
@@ -54,16 +53,7 @@ async def run_cleanup_once(bot: Bot, session_factory: async_sessionmaker[AsyncSe
             owner = await users.get(room.owner_user_id)
             await rooms.delete(room.id)
             if owner is not None:
-                await _send_safe(bot, owner.telegram_id, formatters.room_auto_deleted(room), None)
+                await send_safe(bot, owner.telegram_id, formatters.room_auto_deleted(room))
             logger.info("Комната %s удалена по неактивности", room.id)
 
         await session.commit()
-
-
-async def _send_safe(
-    bot: Bot, chat_id: int, text: str, reply_markup: InlineKeyboardMarkup | None
-) -> None:
-    try:
-        await bot.send_message(chat_id, text, reply_markup=reply_markup)
-    except TelegramAPIError:
-        logger.warning("Не удалось доставить уведомление в чат %s", chat_id)

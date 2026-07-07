@@ -46,6 +46,8 @@ class RoomService:
         room, me = await get_room_and_member(self._rooms, self._participants, user, room_id)
         members_count = await self._participants.count_active(room.id)
         expenses_count, expenses_sum = await self._expenses.expense_stats(room.id)
+        paid = await self._expenses.paid_totals(room.id)
+        owed = await self._expenses.owed_totals(room.id)
         return RoomOverview(
             room=room,
             me=me,
@@ -53,6 +55,7 @@ class RoomService:
             members_count=members_count,
             expenses_count=expenses_count,
             expenses_sum=expenses_sum,
+            my_net=paid.get(me.id, 0) - owed.get(me.id, 0),
         )
 
     async def archive(self, user: User, room_id: int) -> None:

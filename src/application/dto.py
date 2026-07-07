@@ -12,6 +12,7 @@ class RoomOverview:
     members_count: int
     expenses_count: int
     expenses_sum: int
+    my_net: int  # личный баланс: потратил минус доля, в копейках
 
 
 @dataclass(frozen=True, slots=True)

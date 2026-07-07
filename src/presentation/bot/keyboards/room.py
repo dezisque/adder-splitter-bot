@@ -43,10 +43,10 @@ def room_card_kb(o: RoomOverview) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     rid = o.room.id
     if not o.room.is_archived:
-        kb.row(_btn("💸 Добавить расход", RoomCB(action=RoomAction.ADD_EXPENSE, room_id=rid)))
+        kb.row(_btn("➕ Добавить расход", RoomCB(action=RoomAction.ADD_EXPENSE, room_id=rid)))
     kb.row(
         _btn("📊 Баланс", RoomCB(action=RoomAction.BALANCE, room_id=rid)),
-        _btn("📜 История", RoomCB(action=RoomAction.HISTORY, room_id=rid)),
+        _btn("🕓 История", RoomCB(action=RoomAction.HISTORY, room_id=rid)),
     )
     members_btn = _btn("👥 Участники", RoomCB(action=RoomAction.MEMBERS, room_id=rid))
     if o.room.is_archived:

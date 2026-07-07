@@ -57,6 +57,10 @@ async def test_full_flow(services: Services) -> None:
     view = await services.balance.get(igor, room.id)
     paid = {e.participant.display_name: e.paid for e in view.lines}
     assert paid == {"Игорь": 450_000, "Маша": 120_000, "Данил": 80_000}
+
+    # личный баланс в карточке комнаты совпадает с расчётом
+    overview = await services.rooms.get_overview(igor, room.id)
+    assert overview.my_net == 233_333
     assert sum(e.net for e in view.lines) == 0
     assert sum(e.owed for e in view.lines) == 650_000
     # Игорь — единственный кредитор, ему должны и Маша, и Данил
@@ -248,6 +252,10 @@ async def test_members_view_has_usernames(services: Services) -> None:
     assert by_name["Игорь"].username == "igor_k"
     assert by_name["Серёга"].username is None
     assert by_name["Серёга"].participant.is_virtual
+
+    targets = await services.members.list_members_with_telegram(igor, room.id)
+    by_tg = {p.display_name: tg for p, tg in targets}
+    assert by_tg == {"Игорь": 8001, "Серёга": None}
 
 
 async def test_leave_and_rejoin_keeps_participant(services: Services) -> None:

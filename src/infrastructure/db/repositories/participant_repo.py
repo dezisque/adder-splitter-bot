@@ -58,6 +58,15 @@ class SqlParticipantRepo:
         rows = await self._session.execute(stmt)
         return [(_to_domain(row[0]), row[1]) for row in rows]
 
+    async def list_with_telegram_ids(self, room_id: int) -> list[tuple[Participant, int | None]]:
+        rows = await self._session.execute(
+            select(ParticipantModel, UserModel.telegram_id)
+            .join(UserModel, ParticipantModel.user_id == UserModel.id, isouter=True)
+            .where(ParticipantModel.room_id == room_id, ParticipantModel.is_active)
+            .order_by(ParticipantModel.id)
+        )
+        return [(_to_domain(row[0]), row[1]) for row in rows]
+
     async def count_active(self, room_id: int) -> int:
         count = await self._session.scalar(
             select(func.count())

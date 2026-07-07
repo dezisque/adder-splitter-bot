@@ -1,4 +1,4 @@
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -31,6 +31,7 @@ from src.presentation.bot.keyboards.expense import (
     split_kb,
 )
 from src.presentation.bot.keyboards.room import confirm_kb, room_card_kb
+from src.presentation.bot.notifications import notify_expense_added
 from src.presentation.bot.states import AddExpense, EditExpense
 from src.presentation.bot.utils import edit_or_answer, parse_amount
 
@@ -100,7 +101,9 @@ async def add_expense_payer(
     await state.update_data(payer_id=callback_data.participant_id, split_ids=selected)
     await state.set_state(AddExpense.split)
     await edit_or_answer(
-        callback, texts.EXPENSE_SPLIT_PROMPT, split_kb(participants, set(selected))
+        callback,
+        formatters.split_prompt(len(selected), len(participants)),
+        split_kb(participants, set(selected)),
     )
     await callback.answer()
 
@@ -121,7 +124,11 @@ async def _toggle_split(
         pid = callback_data.participant_id
         selected.symmetric_difference_update({pid})
     await state.update_data(split_ids=list(selected))
-    await edit_or_answer(callback, texts.EXPENSE_SPLIT_PROMPT, split_kb(participants, selected))
+    await edit_or_answer(
+        callback,
+        formatters.split_prompt(len(selected), len(participants)),
+        split_kb(participants, selected),
+    )
     await callback.answer()
 
 
@@ -167,9 +174,11 @@ async def add_expense_save(
     user: User,
     expense_service: ExpenseService,
     room_service: RoomService,
+    member_service: MemberService,
+    bot: Bot,
 ) -> None:
     data = await state.get_data()
-    await expense_service.add(
+    expense = await expense_service.add(
         user,
         room_id=data["room_id"],
         payer_participant_id=data["payer_id"],
@@ -179,6 +188,10 @@ async def add_expense_save(
     )
     await state.clear()
     overview = await room_service.get_overview(user, data["room_id"])
+    targets = await member_service.list_members_with_telegram(user, data["room_id"])
+    payer = next((p for p, _ in targets if p.id == expense.paid_by_participant_id), None)
+    if payer is not None:
+        await notify_expense_added(bot, overview.room, expense, payer, targets, user.telegram_id)
     await edit_or_answer(
         callback,
         f"{texts.EXPENSE_SAVED}\n\n{formatters.room_card(overview)}",
@@ -318,7 +331,9 @@ async def cb_edit_split(
         split_ids=selected,
     )
     await edit_or_answer(
-        callback, texts.EXPENSE_SPLIT_PROMPT, split_kb(participants, set(selected))
+        callback,
+        formatters.split_prompt(len(selected), len(participants)),
+        split_kb(participants, set(selected)),
     )
     await callback.answer()
 

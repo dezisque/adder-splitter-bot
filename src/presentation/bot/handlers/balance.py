@@ -1,4 +1,4 @@
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -21,6 +21,7 @@ from src.presentation.bot.keyboards.balance import (
     repay_payer_kb,
     repay_recipient_kb,
 )
+from src.presentation.bot.notifications import notify_repayment_added
 from src.presentation.bot.states import AddRepayment
 from src.presentation.bot.utils import edit_or_answer, parse_amount
 
@@ -123,8 +124,10 @@ async def _save_repayment(
     amount: int,
     expense_service: ExpenseService,
     balance_service: BalanceService,
+    member_service: MemberService,
+    bot: Bot,
 ) -> str:
-    await expense_service.add_repayment(
+    expense = await expense_service.add_repayment(
         user,
         room_id=data["room_id"],
         from_participant_id=data["from_id"],
@@ -132,6 +135,13 @@ async def _save_repayment(
         amount=amount,
     )
     view = await balance_service.get(user, data["room_id"])
+    targets = await member_service.list_members_with_telegram(user, data["room_id"])
+    by_id = {p.id: p for p, _ in targets}
+    payer, recipient = by_id.get(data["from_id"]), by_id.get(data["to_id"])
+    if payer is not None and recipient is not None:
+        await notify_repayment_added(
+            bot, view.room, expense, payer, recipient, targets, user.telegram_id
+        )
     return f"{texts.REPAY_SAVED}\n\n{formatters.balance(view)}"
 
 
@@ -142,10 +152,14 @@ async def repay_amount(
     user: User,
     expense_service: ExpenseService,
     balance_service: BalanceService,
+    member_service: MemberService,
+    bot: Bot,
 ) -> None:
     amount = parse_amount(message.text or "")
     data = await state.get_data()
-    text = await _save_repayment(user, data, amount, expense_service, balance_service)
+    text = await _save_repayment(
+        user, data, amount, expense_service, balance_service, member_service, bot
+    )
     await state.clear()
     await message.answer(text, reply_markup=balance_kb(data["room_id"], can_repay=True))
 
@@ -158,9 +172,13 @@ async def repay_amount_button(
     user: User,
     expense_service: ExpenseService,
     balance_service: BalanceService,
+    member_service: MemberService,
+    bot: Bot,
 ) -> None:
     data = await state.get_data()
-    text = await _save_repayment(user, data, callback_data.amount, expense_service, balance_service)
+    text = await _save_repayment(
+        user, data, callback_data.amount, expense_service, balance_service, member_service, bot
+    )
     await state.clear()
     await edit_or_answer(callback, text, balance_kb(data["room_id"], can_repay=True))
     await callback.answer(texts.REPAY_SAVED)

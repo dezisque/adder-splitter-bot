@@ -33,11 +33,23 @@ def button_name(p: Participant, max_len: int = 28) -> str:
 
 def room_card(o: RoomOverview) -> str:
     archived = "\n📦 <i>В архиве — только просмотр</i>" if o.room.is_archived else ""
+    currency = o.room.currency
+    if o.my_net > 0:
+        my = f"🟢 Ваш баланс: <b>{signed_money(o.my_net, currency)}</b> — вам должны"
+    elif o.my_net < 0:
+        my = f"🔴 Ваш баланс: <b>{money(o.my_net, currency)}</b> — вы должны"
+    else:
+        my = f"⚪️ Ваш баланс: <b>{money(0, currency)}</b> — всё закрыто"
     return (
         f"<b>{escape(o.room.title)}</b>{archived}\n\n"
+        f"{my}\n\n"
         f"👥 Участников: {o.members_count}\n"
-        f"💸 Расходов: {o.expenses_count} на {money(o.expenses_sum, o.room.currency)}"
+        f"🧾 Расходов: {o.expenses_count} на {money(o.expenses_sum, currency)}"
     )
+
+
+def split_prompt(selected: int, total: int) -> str:
+    return f"Между кем делим?\n\n🔴 — участвует, ⚪️ — нет. Выбрано: <b>{selected} из {total}</b>"
 
 
 def members_list(room: Room, members: list[MemberView]) -> str:
@@ -90,7 +102,7 @@ def expense_preview(
     names = ", ".join(name(p) for p in split_between)
     return (
         "<b>Проверьте:</b>\n\n"
-        f"💸 {escape(description)} — <b>{money(amount, currency)}</b>\n"
+        f"🧾 {escape(description)} — <b>{money(amount, currency)}</b>\n"
         f"Оплатил: {name(payer)}\n"
         f"Делится между ({len(split_between)}): {names}"
     )
@@ -113,7 +125,7 @@ def expense_card(card: ExpenseCard) -> str:
             f"  • {name(p)} — {money(share, currency)}" for p, share in card.shares
         )
         body = (
-            f"💸 <b>{escape(e.description)}</b>\n\n"
+            f"🧾 <b>{escape(e.description)}</b>\n\n"
             f"Сумма: <b>{money(e.amount.amount, currency)}</b>\n"
             f"Оплатил: {name(card.payer)}\n"
             f"Делится между ({len(card.shares)}):\n{share_lines}"
@@ -123,11 +135,11 @@ def expense_card(card: ExpenseCard) -> str:
 
 def history_header(page: int, total_pages: int) -> str:
     pages = f" — стр. {page + 1}/{total_pages}" if total_pages > 1 else ""
-    return f"<b>📜 История{pages}</b>\n\nНажмите на запись, чтобы открыть её."
+    return f"<b>🕓 История{pages}</b>\n\nНажмите на запись, чтобы открыть её."
 
 
 def history_button(kind: ExpenseKind, description: str, amount: int, currency: str) -> str:
-    icon = "↩️" if kind is ExpenseKind.REPAYMENT else "💸"
+    icon = "↩️" if kind is ExpenseKind.REPAYMENT else "🧾"
     return f"{icon} {description[:24]} — {money(amount, currency)}"
 
 
@@ -145,7 +157,7 @@ def balance(view: BalanceView) -> str:
     if view.transfers:
         parts.append("\n<b>Кто кому должен:</b>")
         parts.extend(
-            f"➡️ {name(t.from_participant)} → {name(t.to_participant)}: "
+            f"▪️ {name(t.from_participant)} → {name(t.to_participant)}: "
             f"<b>{money(t.amount, currency)}</b>"
             for t in view.transfers
         )

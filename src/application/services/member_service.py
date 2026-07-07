@@ -62,6 +62,13 @@ class MemberService:
         rows = await self._participants.list_with_usernames(room_id)
         return [MemberView(participant=p, username=username) for p, username in rows]
 
+    async def list_members_with_telegram(
+        self, user: User, room_id: int
+    ) -> list[tuple[Participant, int | None]]:
+        """Активные участники с telegram_id — адресаты уведомлений."""
+        await get_room_and_member(self._rooms, self._participants, user, room_id)
+        return await self._participants.list_with_telegram_ids(room_id)
+
     async def leave(self, user: User, room_id: int) -> None:
         room, me = await get_room_and_member(self._rooms, self._participants, user, room_id)
         if room.owner_user_id == user.id:
