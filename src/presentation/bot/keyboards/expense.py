@@ -3,12 +3,15 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.application.dto import ExpenseCard, HistoryPage
 from src.domain.entities import Participant, Room
-from src.domain.enums import ExpenseKind
+from src.domain.enums import ExpenseKind, SplitType
 from src.presentation.bot import formatters
 from src.presentation.bot.callbacks import (
     CancelCB,
     ConfirmCB,
     EditPayerCB,
+    ExactBackCB,
+    ExactDoneCB,
+    ExactPickCB,
     ExpAction,
     ExpCB,
     ExpListCB,
@@ -43,7 +46,9 @@ def payer_kb(participants: list[Participant], suggested_id: int) -> InlineKeyboa
     return kb.as_markup()
 
 
-def split_kb(participants: list[Participant], selected: set[int]) -> InlineKeyboardMarkup:
+def split_kb(
+    participants: list[Participant], selected: set[int], allow_exact: bool = True
+) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for p in participants:
         mark = "🔴" if p.id in selected else "⚪️"
@@ -60,9 +65,45 @@ def split_kb(participants: list[Participant], selected: set[int]) -> InlineKeybo
         text=f"✔️ Готово ({len(selected)})",
         callback_data=SplitCB(action=SplitAction.DONE, participant_id=0),
     )
+    sizes = [2]
+    if allow_exact:
+        ctrl.button(
+            text="✏️ Свои суммы",
+            callback_data=SplitCB(action=SplitAction.EXACT, participant_id=0),
+        )
+        sizes.append(1)
     ctrl.button(text="✖️ Отмена", callback_data=CancelCB())
-    ctrl.adjust(2, 1)
+    sizes.append(1)
+    ctrl.adjust(*sizes)
     kb.attach(ctrl)
+    return kb.as_markup()
+
+
+def exact_pick_kb(
+    participants: list[Participant], shares: dict[int, int], currency: str
+) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for p in participants:
+        fixed = shares.get(p.id)
+        suffix = formatters.money(fixed, currency) if fixed is not None else "?"
+        kb.button(
+            text=f"{formatters.button_name(p)} — {suffix}",
+            callback_data=ExactPickCB(participant_id=p.id),
+        )
+    kb.adjust(1)
+    ctrl = InlineKeyboardBuilder()
+    ctrl.button(text="✔️ Готово — остальным поровну", callback_data=ExactDoneCB())
+    ctrl.button(text="✖️ Отмена", callback_data=CancelCB())
+    ctrl.adjust(1)
+    kb.attach(ctrl)
+    return kb.as_markup()
+
+
+def exact_amount_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅️ Назад", callback_data=ExactBackCB())
+    kb.button(text="✖️ Отмена", callback_data=CancelCB())
+    kb.adjust(2)
     return kb.as_markup()
 
 
@@ -118,21 +159,28 @@ def history_kb(page: HistoryPage, room_id: int) -> InlineKeyboardMarkup:
 def expense_card_kb(card: ExpenseCard) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     eid = card.expense.id
+    is_exact_expense = (
+        card.expense.kind is ExpenseKind.EXPENSE and card.expense.split_type is SplitType.EXACT
+    )
     if card.can_edit and not card.room.is_archived:
         kb.button(
             text="✏️ Описание", callback_data=ExpCB(action=ExpAction.EDIT_DESC, expense_id=eid)
         )
-        kb.button(
-            text="💰 Сумма", callback_data=ExpCB(action=ExpAction.EDIT_AMOUNT, expense_id=eid)
-        )
+        # у ручных долей сумму и делёжку не правим — только пересоздать
+        if not is_exact_expense:
+            kb.button(
+                text="💰 Сумма", callback_data=ExpCB(action=ExpAction.EDIT_AMOUNT, expense_id=eid)
+            )
         if card.expense.kind is ExpenseKind.EXPENSE:
             kb.button(
                 text="👤 Плательщик",
                 callback_data=ExpCB(action=ExpAction.EDIT_PAYER, expense_id=eid),
             )
-            kb.button(
-                text="👥 Делёжка", callback_data=ExpCB(action=ExpAction.EDIT_SPLIT, expense_id=eid)
-            )
+            if not is_exact_expense:
+                kb.button(
+                    text="👥 Делёжка",
+                    callback_data=ExpCB(action=ExpAction.EDIT_SPLIT, expense_id=eid),
+                )
         kb.button(text="🗑 Удалить", callback_data=ExpCB(action=ExpAction.DELETE, expense_id=eid))
     kb.button(text="⬅️ К истории", callback_data=ExpListCB(room_id=card.expense.room_id, page=0))
     kb.adjust(2)

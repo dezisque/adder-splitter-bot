@@ -14,6 +14,8 @@ class AddExpense(StatesGroup):
     amount = State()
     payer = State()
     split = State()
+    exact_pick = State()  # «Свои суммы»: кому задать сумму
+    exact_amount = State()  # ввод суммы выбранному участнику
     confirm = State()
 
 

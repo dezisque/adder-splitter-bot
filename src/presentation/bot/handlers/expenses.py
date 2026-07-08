@@ -1,6 +1,6 @@
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from src.application.services.expense_service import ExpenseService
 from src.application.services.member_service import MemberService
@@ -8,10 +8,14 @@ from src.application.services.room_service import RoomService
 from src.domain import limits
 from src.domain.entities import User
 from src.domain.exceptions import InvalidInput
+from src.domain.services.split import split_evenly
 from src.presentation.bot import formatters, texts
 from src.presentation.bot.callbacks import (
     ConfirmCB,
     EditPayerCB,
+    ExactBackCB,
+    ExactDoneCB,
+    ExactPickCB,
     ExpAction,
     ExpCB,
     ExpListCB,
@@ -26,6 +30,8 @@ from src.presentation.bot.keyboards.expense import (
     cancel_kb,
     confirm_expense_kb,
     edit_payer_kb,
+    exact_amount_kb,
+    exact_pick_kb,
     expense_card_kb,
     history_kb,
     payer_kb,
@@ -131,15 +137,18 @@ async def _toggle_split(
         pid = callback_data.participant_id
         selected.symmetric_difference_update({pid})
     await state.update_data(split_ids=list(selected))
+    allow_exact = await state.get_state() == AddExpense.split.state
     await edit_or_answer(
         callback,
         formatters.split_prompt(len(selected), len(participants)),
-        split_kb(participants, selected),
+        split_kb(participants, selected, allow_exact=allow_exact),
     )
     await callback.answer()
 
 
-@router.callback_query(AddExpense.split, SplitCB.filter(F.action != SplitAction.DONE))
+@router.callback_query(
+    AddExpense.split, SplitCB.filter(F.action.in_({SplitAction.TOGGLE, SplitAction.ALL}))
+)
 async def add_expense_split_toggle(
     callback: CallbackQuery,
     callback_data: SplitCB,
@@ -166,9 +175,146 @@ async def add_expense_split_done(
     if payer is None or len(split_between) != len(selected):
         await callback.answer(texts.STALE_BUTTON, show_alert=True)
         return
+    await state.update_data(exact_final=None)  # обычная делёжка перекрывает ручные доли
     await state.set_state(AddExpense.confirm)
     preview = formatters.expense_preview(
         data["description"], data["amount"], data["currency"], payer, split_between
+    )
+    await edit_or_answer(callback, preview, confirm_expense_kb())
+    await callback.answer()
+
+
+# ---------- «Свои суммы» (неравная делёжка) ----------
+
+
+def _exact_shares(data: dict[str, object]) -> dict[int, int]:
+    raw = data.get("exact_shares", {})
+    return {int(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+async def _exact_pick_view(
+    state: FSMContext, user: User, member_service: MemberService
+) -> tuple[str, InlineKeyboardMarkup]:
+    data = await state.get_data()
+    shares = _exact_shares(data)
+    selected = set(data.get("split_ids", []))
+    participants = [
+        p for p in await member_service.list_members(user, data["room_id"]) if p.id in selected
+    ]
+    text = formatters.exact_pick_text(data["amount"], sum(shares.values()), data["currency"])
+    return text, exact_pick_kb(participants, shares, data["currency"])
+
+
+@router.callback_query(AddExpense.split, SplitCB.filter(F.action == SplitAction.EXACT))
+async def exact_start(
+    callback: CallbackQuery, state: FSMContext, user: User, member_service: MemberService
+) -> None:
+    data = await state.get_data()
+    if not data.get("split_ids"):
+        await callback.answer(texts.SPLIT_NEED_ONE, show_alert=True)
+        return
+    await state.update_data(exact_shares={})
+    await state.set_state(AddExpense.exact_pick)
+    text, kb = await _exact_pick_view(state, user, member_service)
+    await edit_or_answer(callback, text, kb)
+    await callback.answer()
+
+
+@router.callback_query(AddExpense.exact_pick, ExactPickCB.filter())
+async def exact_pick_person(
+    callback: CallbackQuery,
+    callback_data: ExactPickCB,
+    state: FSMContext,
+    user: User,
+    member_service: MemberService,
+) -> None:
+    data = await state.get_data()
+    participants = await member_service.list_members(user, data["room_id"])
+    person = next((p for p in participants if p.id == callback_data.participant_id), None)
+    if person is None or person.id not in set(data.get("split_ids", [])):
+        await callback.answer(texts.STALE_BUTTON, show_alert=True)
+        return
+    shares = _exact_shares(data)
+    remaining = data["amount"] - sum(v for k, v in shares.items() if k != person.id)
+    await state.update_data(exact_current=person.id)
+    await state.set_state(AddExpense.exact_amount)
+    await edit_or_answer(
+        callback,
+        formatters.exact_amount_prompt(person, remaining, data["currency"]),
+        exact_amount_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(AddExpense.exact_amount, ExactBackCB.filter())
+async def exact_back(
+    callback: CallbackQuery, state: FSMContext, user: User, member_service: MemberService
+) -> None:
+    await state.set_state(AddExpense.exact_pick)
+    text, kb = await _exact_pick_view(state, user, member_service)
+    await edit_or_answer(callback, text, kb)
+    await callback.answer()
+
+
+@router.message(AddExpense.exact_amount, F.text)
+async def exact_amount_input(
+    message: Message, state: FSMContext, user: User, member_service: MemberService
+) -> None:
+    value = parse_amount(message.text or "")
+    data = await state.get_data()
+    pid: int = data["exact_current"]
+    shares = _exact_shares(data)
+    remaining = data["amount"] - sum(v for k, v in shares.items() if k != pid)
+    if value > remaining:
+        free = formatters.money(remaining, data["currency"])
+        raise InvalidInput(f"Слишком много — свободно только {free}")
+    shares[pid] = value
+    await state.update_data(exact_shares={str(k): v for k, v in shares.items()})
+    await state.set_state(AddExpense.exact_pick)
+    text, kb = await _exact_pick_view(state, user, member_service)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(AddExpense.exact_pick, ExactDoneCB.filter())
+async def exact_done(
+    callback: CallbackQuery, state: FSMContext, user: User, member_service: MemberService
+) -> None:
+    data = await state.get_data()
+    shares = _exact_shares(data)
+    selected: list[int] = data.get("split_ids", [])
+    rest = [pid for pid in selected if pid not in shares]
+    remainder = data["amount"] - sum(shares.values())
+    if rest:
+        if remainder < len(rest):
+            await callback.answer(
+                "Остаток слишком мал, чтобы поделить его на оставшихся — "
+                "уменьшите чьи-то суммы или уберите участников.",
+                show_alert=True,
+            )
+            return
+        shares.update(split_evenly(remainder, rest))
+    elif remainder != 0:
+        free = formatters.money(remainder, data["currency"])
+        await callback.answer(f"Не распределено {free} — поправьте суммы.", show_alert=True)
+        return
+
+    participants = await member_service.list_members(user, data["room_id"])
+    by_id = {p.id: p for p in participants}
+    payer = by_id.get(data["payer_id"])
+    split_between = [by_id[pid] for pid in selected if pid in by_id]
+    if payer is None or len(split_between) != len(selected):
+        await callback.answer(texts.STALE_BUTTON, show_alert=True)
+        return
+    await state.update_data(exact_final={str(k): v for k, v in shares.items()})
+    await state.set_state(AddExpense.confirm)
+    preview = formatters.expense_preview(
+        data["description"],
+        data["amount"],
+        data["currency"],
+        payer,
+        split_between,
+        room_title=data.get("room_title"),
+        shares=shares,
     )
     await edit_or_answer(callback, preview, confirm_expense_kb())
     await callback.answer()
@@ -185,14 +331,25 @@ async def add_expense_save(
     bot: Bot,
 ) -> None:
     data = await state.get_data()
-    expense = await expense_service.add(
-        user,
-        room_id=data["room_id"],
-        payer_participant_id=data["payer_id"],
-        amount=data["amount"],
-        description=data["description"],
-        participant_ids=data["split_ids"],
-    )
+    exact_raw = data.get("exact_final")
+    if exact_raw:
+        expense = await expense_service.add_exact(
+            user,
+            room_id=data["room_id"],
+            payer_participant_id=data["payer_id"],
+            amount=data["amount"],
+            description=data["description"],
+            shares={int(k): v for k, v in exact_raw.items()},
+        )
+    else:
+        expense = await expense_service.add(
+            user,
+            room_id=data["room_id"],
+            payer_participant_id=data["payer_id"],
+            amount=data["amount"],
+            description=data["description"],
+            participant_ids=data["split_ids"],
+        )
     await state.clear()
     overview = await room_service.get_overview(user, data["room_id"])
     targets = await member_service.list_members_with_telegram(user, data["room_id"])
@@ -340,12 +497,14 @@ async def cb_edit_split(
     await edit_or_answer(
         callback,
         formatters.split_prompt(len(selected), len(participants)),
-        split_kb(participants, set(selected)),
+        split_kb(participants, set(selected), allow_exact=False),
     )
     await callback.answer()
 
 
-@router.callback_query(EditExpense.split, SplitCB.filter(F.action != SplitAction.DONE))
+@router.callback_query(
+    EditExpense.split, SplitCB.filter(F.action.in_({SplitAction.TOGGLE, SplitAction.ALL}))
+)
 async def edit_split_toggle(
     callback: CallbackQuery,
     callback_data: SplitCB,

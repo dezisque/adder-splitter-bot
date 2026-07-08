@@ -8,3 +8,4 @@ class ExpenseKind(StrEnum):
 
 class SplitType(StrEnum):
     EQUAL = "equal"
+    EXACT = "exact"  # доли заданы вручную

@@ -11,6 +11,7 @@ from src.domain.services.split import split_evenly
 from src.domain.value_objects import Money
 
 REPAYMENT_DESCRIPTION = "Возврат долга"
+EXACT_EDIT_FORBIDDEN = "У этой записи доли заданы вручную — проще удалить её и создать заново"
 
 
 def _validate_amount(amount: int) -> None:
@@ -75,6 +76,45 @@ class ExpenseService:
             amount=amount,
             description=description,
             split_type=SplitType.EQUAL,
+            created_by_user_id=actor.id,
+            shares=shares,
+            currency=room.currency,
+        )
+
+    async def add_exact(
+        self,
+        actor: User,
+        *,
+        room_id: int,
+        payer_participant_id: int,
+        amount: int,
+        description: str,
+        shares: dict[int, int],
+    ) -> Expense:
+        """Расход с ручными долями: сумма долей обязана сойтись с чеком."""
+        room, _ = await get_room_and_member(self._rooms, self._participants, actor, room_id)
+        ensure_writable(room)
+        description = _validate_description(description)
+        _validate_amount(amount)
+        active = await self._active_map(room.id)
+        if payer_participant_id not in active:
+            raise InvalidInput("Плательщик не является участником комнаты")
+        if not shares or set(shares) - active.keys():
+            raise InvalidInput("Список участников делёжки устарел — попробуйте заново")
+        if any(share <= 0 for share in shares.values()):
+            raise InvalidInput("Доли должны быть положительными")
+        if sum(shares.values()) != amount:
+            raise InvalidInput("Сумма долей не сходится с чеком — попробуйте заново")
+        if await self._expenses.count(room.id) >= limits.MAX_EXPENSES_PER_ROOM:
+            raise LimitExceeded("Достигнут лимит записей в комнате")
+        await self._rooms.touch_activity(room.id)
+        return await self._expenses.add(
+            room_id=room.id,
+            kind=ExpenseKind.EXPENSE,
+            paid_by_participant_id=payer_participant_id,
+            amount=amount,
+            description=description,
+            split_type=SplitType.EXACT,
             created_by_user_id=actor.id,
             shares=shares,
             currency=room.currency,
@@ -148,6 +188,8 @@ class ExpenseService:
 
     async def edit_amount(self, actor: User, expense_id: int, amount: int) -> None:
         expense, _ = await self._ensure_editable(actor, expense_id)
+        if expense.kind is ExpenseKind.EXPENSE and expense.split_type is SplitType.EXACT:
+            raise InvalidInput(EXACT_EDIT_FORBIDDEN)
         _validate_amount(amount)
         if expense.kind is ExpenseKind.REPAYMENT:
             shares = {expense.shares[0].participant_id: amount}
@@ -167,6 +209,8 @@ class ExpenseService:
         expense, room = await self._ensure_editable(actor, expense_id)
         if expense.kind is ExpenseKind.REPAYMENT:
             raise InvalidInput("У возврата долга нельзя изменить делёжку")
+        if expense.split_type is SplitType.EXACT:
+            raise InvalidInput(EXACT_EDIT_FORBIDDEN)
         active = await self._active_map(room.id)
         if not participant_ids or set(participant_ids) - active.keys():
             raise InvalidInput("Список участников делёжки устарел — попробуйте заново")

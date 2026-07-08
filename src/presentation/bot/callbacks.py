@@ -91,11 +91,26 @@ class SplitAction(StrEnum):
     TOGGLE = "t"
     ALL = "a"
     DONE = "ok"
+    EXACT = "ex"  # переход в режим «Свои суммы»
 
 
 class SplitCB(CallbackData, prefix="s"):
     action: SplitAction
     participant_id: int  # 0 для all/done
+
+
+class ExactPickCB(CallbackData, prefix="xp"):
+    """«Свои суммы»: выбрать участника, чтобы задать ему сумму."""
+
+    participant_id: int
+
+
+class ExactDoneCB(CallbackData, prefix="xd"):
+    """«Свои суммы»: завершить — остаток поровну между остальными."""
+
+
+class ExactBackCB(CallbackData, prefix="xb"):
+    """«Свои суммы»: назад к списку участников без ввода суммы."""
 
 
 class RepayFromCB(CallbackData, prefix="rf"):

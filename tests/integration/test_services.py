@@ -2,7 +2,8 @@ import os
 
 import pytest
 
-from src.domain.exceptions import AccessDenied, NotFound
+from src.domain.enums import SplitType
+from src.domain.exceptions import AccessDenied, InvalidInput, NotFound
 from tests.integration.conftest import Services, make_user
 
 pytestmark = pytest.mark.skipif(
@@ -122,6 +123,56 @@ async def test_history_and_edits(services: Services) -> None:
     assert room_id == room.id
     page = await services.expenses.get_history_page(igor, room.id, 0)
     assert page.items == []
+
+
+async def test_exact_split(services: Services) -> None:
+    """Кейс из фидбэка: в кафе один взял напиток, другой — еду и напиток."""
+    igor = await make_user(services, 9001, "Игорь")
+    masha = await make_user(services, 9002, "Маша")
+    room = await services.rooms.create(igor, "Кафе")
+    await services.members.join_by_token(masha, room.invite_token)
+    zhenya = await services.members.add_virtual(igor, room.id, "Женя")
+    members = await services.members.list_members(igor, room.id)
+    by_name = {p.display_name: p for p in members}
+
+    # чек 3000: Женя только напиток на 400, остальное пополам
+    expense = await services.expenses.add_exact(
+        igor,
+        room_id=room.id,
+        payer_participant_id=by_name["Игорь"].id,
+        amount=300_000,
+        description="Кафе",
+        shares={zhenya.id: 40_000, by_name["Игорь"].id: 130_000, by_name["Маша"].id: 130_000},
+    )
+    assert expense.split_type is SplitType.EXACT
+
+    card = await services.expenses.get_card(igor, expense.id)
+    shares = {p.display_name: amount for p, amount in card.shares}
+    assert shares == {"Женя": 40_000, "Игорь": 130_000, "Маша": 130_000}
+
+    view = await services.balance.get(igor, room.id)
+    owed = {e.participant.display_name: e.owed for e in view.lines}
+    assert owed == {"Женя": 40_000, "Игорь": 130_000, "Маша": 130_000}
+
+    # доли не сходятся с чеком — отказ
+    with pytest.raises(InvalidInput):
+        await services.expenses.add_exact(
+            igor,
+            room_id=room.id,
+            payer_participant_id=by_name["Игорь"].id,
+            amount=300_000,
+            description="Кривой чек",
+            shares={zhenya.id: 40_000, by_name["Игорь"].id: 130_000},
+        )
+
+    # у ручных долей сумма и делёжка не редактируются
+    with pytest.raises(InvalidInput):
+        await services.expenses.edit_amount(igor, expense.id, 500_000)
+    with pytest.raises(InvalidInput):
+        await services.expenses.edit_split(igor, expense.id, [by_name["Игорь"].id])
+    # а описание и плательщик — можно
+    await services.expenses.edit_description(igor, expense.id, "Кафе на троих")
+    await services.expenses.edit_payer(igor, expense.id, by_name["Маша"].id)
 
 
 async def test_edit_denied_for_outsider_author(services: Services) -> None:

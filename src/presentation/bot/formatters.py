@@ -5,7 +5,7 @@ from html import escape
 from src.application.dto import BalanceView, ExpenseCard, HistoryPage, MemberView, RoomOverview
 from src.domain import limits
 from src.domain.entities import Participant, Room
-from src.domain.enums import ExpenseKind
+from src.domain.enums import ExpenseKind, SplitType
 from src.domain.value_objects import Money
 
 VIRTUAL_MARK = "👻"
@@ -58,6 +58,25 @@ def split_prompt(selected: int, total: int) -> str:
     return f"Между кем делим?\n\n🔴 — участвует, ⚪️ — нет. Выбрано: <b>{selected} из {total}</b>"
 
 
+def exact_pick_text(amount: int, distributed: int, currency: str) -> str:
+    remaining = amount - distributed
+    return (
+        "✏️ <b>Свои суммы</b>\n\n"
+        f"Чек: <b>{money(amount, currency)}</b>\n"
+        f"Распределено: {money(distributed, currency)} · "
+        f"Осталось: <b>{money(remaining, currency)}</b>\n\n"
+        "Нажмите на участника и задайте ему сумму. Кому не зададите — "
+        "поделят остаток поровну."
+    )
+
+
+def exact_amount_prompt(participant: Participant, remaining: int, currency: str) -> str:
+    return (
+        f"Сколько за {name(participant)}?\n\n"
+        f"Свободно: <b>{money(remaining, currency)}</b>. Например: <b>400</b>"
+    )
+
+
 def members_list(room: Room, members: list[MemberView]) -> str:
     lines = [f"<b>Участники «{escape(room.title)}»</b>\n"]
     has_virtual = False
@@ -105,15 +124,26 @@ def expense_preview(
     payer: Participant,
     split_between: list[Participant],
     room_title: str | None = None,
+    shares: dict[int, int] | None = None,
 ) -> str:
-    names = ", ".join(name(p) for p in split_between)
     room_line = f"Комната: <b>{escape(room_title)}</b>\n" if room_title else ""
+    if shares is None:
+        split_part = f"Делится между ({len(split_between)}): " + ", ".join(
+            name(p) for p in split_between
+        )
+    else:
+        lines = "\n".join(
+            f"  • {name(p)} — {money(shares[p.id], currency)}"
+            for p in split_between
+            if p.id in shares
+        )
+        split_part = f"Делится так:\n{lines}"
     return (
         "<b>Проверьте:</b>\n\n"
         f"{room_line}"
         f"🧾 {escape(description)} — <b>{money(amount, currency)}</b>\n"
         f"Оплатил: {name(payer)}\n"
-        f"Делится между ({len(split_between)}): {names}"
+        f"{split_part}"
     )
 
 
@@ -133,11 +163,16 @@ def expense_card(card: ExpenseCard) -> str:
         share_lines = "\n".join(
             f"  • {name(p)} — {money(share, currency)}" for p, share in card.shares
         )
+        split_label = (
+            "Делится так (суммы вручную)"
+            if e.split_type is SplitType.EXACT
+            else f"Делится между ({len(card.shares)})"
+        )
         body = (
             f"🧾 <b>{escape(e.description)}</b>\n\n"
             f"Сумма: <b>{money(e.amount.amount, currency)}</b>\n"
             f"Оплатил: {name(card.payer)}\n"
-            f"Делится между ({len(card.shares)}):\n{share_lines}"
+            f"{split_label}:\n{share_lines}"
         )
     return f"{body}\n\nДобавил: {escape(card.author_name)}, {created}"
 
